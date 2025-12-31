@@ -254,17 +254,7 @@ This is for learning/prototyping. Real GPS receivers also do:
 
 1. Kaplan & Hegarty - *Understanding GPS/GNSS* (the standard textbook)
 2. Misra & Enge - *Global Positioning System* (another good one)
-3. IS-GPS-200 (official GPS spec)
 
 ## License
 
 MIT - do whatever you want with it
-
-## About
-
-Made by Hamoud Alshammari  
-[GitHub](https://github.com/OrbitAR7) | [LinkedIn](https://www.linkedin.com/in/hamoud-alshammari-7415b617a/)
-
----
-
-*If you find this useful or have questions, feel free to open an issue!*
