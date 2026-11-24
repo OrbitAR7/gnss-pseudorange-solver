@@ -40,6 +40,12 @@ if(BUILD_TESTS)
     add_executable(test_gnss_solver tests/test_gnss_solver.cpp)
     target_link_libraries(test_gnss_solver PRIVATE gnss_solver)
     add_test(NAME GNSSSolverTests COMMAND test_gnss_solver)
+
+    # The examples should also run to completion
+    if(BUILD_EXAMPLES)
+        add_test(NAME gps_position_fix COMMAND gps_position_fix WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+        add_test(NAME dop_analysis COMMAND dop_analysis WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    endif()
 endif()
 
 # Installation

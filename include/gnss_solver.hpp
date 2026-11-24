@@ -215,6 +215,19 @@ inline ECEF llaToECEF(const LLA& lla) {
     return ECEF(x, y, z);
 }
 
+/**
+ * @brief Elevation of a satellite seen from a receiver [rad], above the
+ *        local (geodetic) horizon
+ */
+inline double elevationAngle(const ECEF& receiver, const ECEF& satellite) {
+    const LLA lla = ecefToLLA(receiver);
+    const ECEF d = satellite - receiver;
+    const double up = d.x * std::cos(lla.lat) * std::cos(lla.lon)
+                    + d.y * std::cos(lla.lat) * std::sin(lla.lon)
+                    + d.z * std::sin(lla.lat);
+    return std::asin(up / d.norm());
+}
+
 // ============================================================================
 // Satellite and Measurement Data
 // ============================================================================
@@ -333,6 +346,10 @@ struct SolverConfig {
     int max_iterations = 20;
     bool apply_earth_rotation = true;     // Sagnac correction
     bool weighted_least_squares = false;  // Use measurement weights
+    // Weight each satellite by sin^2(elevation), i.e. sigma_i = sigma_0 / sin(el_i).
+    // Low satellites see more atmosphere and multipath, so they are trusted less.
+    // Combines with weighted_least_squares (the two weights multiply).
+    bool elevation_weighting = false;
     ECEF initial_position = ECEF(0, 0, 0); // Initial guess (0,0,0 = center of Earth)
 };
 
@@ -435,7 +452,14 @@ public:
                 H(i, 3) = 1.0;        // d(rho)/d(cdt)
 
                 // Weight (inverse variance)
-                W(i, i) = config.weighted_least_squares ? pr.weight : 1.0;
+                double w = config.weighted_least_squares ? pr.weight : 1.0;
+                // Elevation is only meaningful once the estimate is near the
+                // surface; the first iteration may start at Earth's centre.
+                if (config.elevation_weighting && std::sqrt(x*x + y*y + z*z) > 6.0e6) {
+                    const double s_el = std::sin(elevationAngle(ECEF(x, y, z), sat_pos));
+                    w *= std::max(s_el * s_el, 1e-4);   // floor: satellites at or below the horizon
+                }
+                W(i, i) = w;
             }
 
             // Weighted least squares: dx = (H^T W H)^-1 H^T W dz
@@ -522,7 +546,8 @@ inline std::vector<Pseudorange> simulatePseudoranges(
     double true_clock_bias,
     const std::vector<SatelliteData>& satellites,
     double noise_std = 1.0,
-    unsigned int seed = 42) {
+    unsigned int seed = 42,
+    bool elevation_dependent_noise = false) {   // if true, sigma = noise_std / sin(el)
     
     std::vector<Pseudorange> measurements;
     
@@ -536,27 +561,14 @@ inline std::vector<Pseudorange> simulatePseudoranges(
     };
     
     for (const auto& sat : satellites) {
-        // Check if satellite is above horizon (elevation > 5°)
-        ECEF diff = sat.position - true_position;
-        double range = diff.norm();
-        
-        LLA user_lla = ecefToLLA(true_position);
-        double sin_lat = std::sin(user_lla.lat);
-        double cos_lat = std::cos(user_lla.lat);
-        double sin_lon = std::sin(user_lla.lon);
-        double cos_lon = std::cos(user_lla.lon);
-        
-        // Up vector in ECEF
-        double up_x = cos_lat * cos_lon;
-        double up_y = cos_lat * sin_lon;
-        double up_z = sin_lat;
-        
-        // Elevation angle
-        double elevation = std::asin((diff.x * up_x + diff.y * up_y + diff.z * up_z) / range);
+        // Keep satellites above a 5° elevation mask
+        double range = (sat.position - true_position).norm();
+        double elevation = elevationAngle(true_position, sat.position);
         
         if (elevation > 5.0 * constants::DEG2RAD) {
             double true_range = range + true_clock_bias - constants::C * sat.clock_bias;
-            double measured = true_range + noise_std * noise();
+            double sigma = elevation_dependent_noise ? noise_std / std::sin(elevation) : noise_std;
+            double measured = true_range + sigma * noise();
             measurements.emplace_back(sat.prn, measured, 45.0);
         }
     }

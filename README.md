@@ -1,6 +1,8 @@
 # gnss-pseudorange-solver
 
-A header-only C++17 GNSS single-point positioning solver. It estimates receiver position and clock bias from pseudoranges by Gauss–Newton (optionally weighted) least squares, with Earth-rotation (Sagnac) correction, DOP and WGS-84 coordinate conversion. It is verified by a test suite against known truth (see [Validation](#validation)).
+[![CI](https://github.com/OrbitAR7/gnss-pseudorange-solver/actions/workflows/CI.yml/badge.svg)](https://github.com/OrbitAR7/gnss-pseudorange-solver/actions/workflows/CI.yml)
+
+A header-only C++17 GNSS single-point positioning solver. It estimates receiver position and clock bias from pseudoranges by Gauss–Newton least squares (optionally weighted, including by satellite elevation), with Earth-rotation (Sagnac) correction, DOP and WGS-84 coordinate conversion. It is verified by a test suite against known truth (see [Validation](#validation)).
 
 ## Quick example
 
@@ -32,7 +34,7 @@ int main() {
 
 ```bash
 cmake -S . -B build && cmake --build build
-cd build && ctest --output-on-failure   # validation tests
+cd build && ctest --output-on-failure   # validation tests (also runs both examples)
 ./gps_position_fix                       # 24-satellite constellation, 100 noisy trials
 ./dop_analysis                           # geometry, satellite count, urban canyon, elevation mask
 ```
@@ -49,6 +51,9 @@ Or copy `include/gnss_solver.hpp` into your project. It has no dependencies.
 | Pseudoranges generated with Earth rotation during signal transit; solver's Sagnac correction on | 2 mm position error |
 | Same data with the Sagnac correction turned off | 32 m error (the size of the effect) |
 | 1 m white noise, 500 Monte Carlo runs | 3-D RMS error 1.71 m vs. PDOP × σ = 1.71 m |
+| Elevation weighting on, noise-free | Position recovered to ~1 nm (6 iterations) |
+| Noise σ₀ / sin(el) with σ₀ = 1 m, 1000 runs, unweighted | 4.11 m vs. 4.07 m predicted |
+| Same data, elevation-weighted | 3.34 m vs. 3.33 m predicted (19% smaller) |
 
 ## How it works
 
@@ -66,6 +71,8 @@ Linearize about the current estimate and iterate:
 
 Here **H** holds the negated unit line-of-sight vectors and a column of ones for the clock term. DOPs come from **Q = (HᵀH)⁻¹**, rotated into local east-north-up axes for HDOP/VDOP.
 
+**Elevation weighting:** low satellites pass through more atmosphere and pick up more multipath, so their pseudoranges are noisier. With `elevation_weighting = true` the solver assumes σᵢ = σ₀ / sin(elᵢ) and weights each satellite by sin²(elᵢ), recomputing elevations from the current estimate on every iteration. If that noise model holds, the weighted error covariance is (HᵀWH)⁻¹. The unweighted solution has the larger (HᵀH)⁻¹ HᵀΣH (HᵀH)⁻¹. The tests check both against Monte Carlo runs.
+
 **Earth rotation:** during the ~70 ms signal transit the Earth turns by ω·τ, so each satellite position is rotated about the z-axis by that angle before the range is computed. τ is approximated by ρ/c, which includes the receiver clock bias. That is accurate to centimetres for typical clock biases.
 
 ## API summary
@@ -75,9 +82,9 @@ Here **H** holds the negated unit line-of-sight vectors and a column of ones for
 | `ECEF`, `LLA` | Coordinates (m; rad, rad, m) with `ecefToLLA` / `llaToECEF` (WGS-84) |
 | `SatelliteData` | PRN, ECEF position [m], satellite clock bias [s] |
 | `Pseudorange` | PRN, range [m], C/N0, weight |
-| `SolverConfig` | Convergence threshold, max iterations, `apply_earth_rotation`, `weighted_least_squares`, initial guess |
+| `SolverConfig` | Convergence threshold, max iterations, `apply_earth_rotation`, `weighted_least_squares`, `elevation_weighting`, initial guess |
 | `GNSSSolver::solve` | Returns `NavSolution`: position, clock bias [m], LLA, DOP, iterations, residuals, validity |
-| Helpers | `simulatePseudoranges` (5° elevation mask, Gaussian noise), `printSolution` |
+| Helpers | `elevationAngle`, `simulatePseudoranges` (5° elevation mask, Gaussian noise, optionally σ / sin(el)), `printSolution` |
 
 ## Limitations and next steps
 
